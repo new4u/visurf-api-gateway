@@ -1,0 +1,53 @@
+{
+  "name": "visurf-api-gateway",
+  "version": "1.0.0",
+  "description": "ViSurf API Gateway - 统一的服务聚合和付费管理",
+  "main": "src/simple-server.js",
+  "scripts": {
+    "start": "node src/simple-server.js",
+    "dev": "nodemon src/simple-server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "axios": "^1.6.0",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.0",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "jsdom": "^27.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.29.4",
+    "morgan": "^1.10.0",
+    "redis": "^4.6.0",
+    "uuid": "^9.0.1",
+    "visurf-svg-api": "file:../visurf-svg-api",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.54.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1",
+    "supertest": "^6.3.3"
+  },
+  "keywords": [
+    "api-gateway",
+    "microservices",
+    "knowledge-graph",
+    "visualization",
+    "svg",
+    "billing"
+  ],
+  "author": "ViSurf Team",
+  "license": "MIT"
+}
