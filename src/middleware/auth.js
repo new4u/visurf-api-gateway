@@ -1,23 +1,26 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const Redis = require('redis');
+const db = require('../db/sqlite');
 
-// Redis客户端
-const redisClient = Redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
-
-redisClient.on('error', (err) => {
-  console.error('Redis连接错误:', err);
-});
-
-redisClient.connect();
+// 定期清理过期令牌（每小时）
+setInterval(() => {
+  try {
+    db.cleanExpiredTokens();
+  } catch (error) {
+    console.error('清理过期令牌错误:', error);
+  }
+}, 60 * 60 * 1000);
 
 /**
  * JWT认证中间件
  */
-const authenticateToken = async (req, res, next) => {
+const authenticateToken = (req, res, next) => {
   try {
+    // 确保 req.id 存在
+    if (!req.id) {
+      req.id = uuidv4();
+    }
+
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
@@ -38,8 +41,7 @@ const authenticateToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     
     // 检查令牌是否被撤销
-    const isRevoked = await redisClient.get(`revoked:${token}`);
-    if (isRevoked) {
+    if (db.isTokenRevoked(token)) {
       return res.status(401).json({
         success: false,
         code: 401,
@@ -53,10 +55,9 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // 获取用户信息
-    const userKey = `user:${decoded.userId}`;
-    const userData = await redisClient.hGetAll(userKey);
+    const user = db.findUserById(decoded.userId);
     
-    if (!userData || !userData.id) {
+    if (!user) {
       return res.status(401).json({
         success: false,
         code: 401,
@@ -70,7 +71,7 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // 检查账户状态
-    if (userData.status !== 'active') {
+    if (user.status !== 'active') {
       return res.status(403).json({
         success: false,
         code: 403,
@@ -85,17 +86,23 @@ const authenticateToken = async (req, res, next) => {
 
     // 设置用户信息
     req.user = {
-      id: userData.id,
-      email: userData.email,
-      plan: userData.plan || 'free',
-      trialUsed: userData.trialUsed === 'true',
-      createdAt: userData.createdAt,
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      plan: user.plan || 'free',
+      trialUsed: user.trial_used === 1,
+      createdAt: user.created_at,
       apiKey: token
     };
 
     next();
   } catch (error) {
     console.error('认证错误:', error);
+    
+    // 确保 req.id 存在
+    if (!req.id) {
+      req.id = uuidv4();
+    }
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
@@ -137,9 +144,22 @@ const authenticateToken = async (req, res, next) => {
 };
 
 /**
- * 限流中间件
+ * 限流中间件（简化版，基于内存）
+ * 生产环境建议使用 Redis 或其他分布式缓存
  */
-const checkRateLimit = async (req, res, next) => {
+const rateLimitStore = new Map();
+
+// 定期清理过期的限流记录
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of rateLimitStore.entries()) {
+    if (value.resetAt < now) {
+      rateLimitStore.delete(key);
+    }
+  }
+}, 60 * 1000); // 每分钟清理一次
+
+const checkRateLimit = (req, res, next) => {
   try {
     const userId = req.user.id;
     const plan = req.user.plan;
@@ -154,23 +174,26 @@ const checkRateLimit = async (req, res, next) => {
     };
 
     const limit = rateLimits[plan] || rateLimits.free;
-    const window = limit.window;
+    const window = limit.window * 1000; // 转换为毫秒
     const maxRequests = limit.requests;
 
     // 生成限流键
-    const rateLimitKey = `ratelimit:${userId}:${service}:${Math.floor(Date.now() / (window * 1000))}`;
+    const now = Date.now();
+    const windowStart = Math.floor(now / window) * window;
+    const rateLimitKey = `${userId}:${service}:${windowStart}`;
     
-    // 获取当前计数
-    const current = await redisClient.incr(rateLimitKey);
-    
-    // 设置过期时间（仅在第一次设置）
-    if (current === 1) {
-      await redisClient.expire(rateLimitKey, window);
+    // 获取或创建计数器
+    let record = rateLimitStore.get(rateLimitKey);
+    if (!record) {
+      record = { count: 0, resetAt: windowStart + window };
+      rateLimitStore.set(rateLimitKey, record);
     }
+    
+    record.count++;
 
     // 检查是否超限
-    if (current > maxRequests) {
-      const ttl = await redisClient.ttl(rateLimitKey);
+    if (record.count > maxRequests) {
+      const resetIn = Math.ceil((record.resetAt - now) / 1000);
       
       return res.status(429).json({
         success: false,
@@ -178,10 +201,10 @@ const checkRateLimit = async (req, res, next) => {
         message: 'Rate limit exceeded',
         error: {
           type: 'RATE_LIMIT_EXCEEDED',
-          details: `Rate limit exceeded for ${service} service. Try again in ${ttl} seconds.`,
+          details: `Rate limit exceeded for ${service} service. Try again in ${resetIn} seconds.`,
           limit: maxRequests,
-          current: current,
-          resetIn: ttl
+          current: record.count,
+          resetIn: resetIn
         },
         requestId: req.id
       });
@@ -189,8 +212,8 @@ const checkRateLimit = async (req, res, next) => {
 
     // 设置响应头
     res.setHeader('X-RateLimit-Limit', maxRequests);
-    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - current));
-    res.setHeader('X-RateLimit-Reset', Math.floor(Date.now() / 1000) + window);
+    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
+    res.setHeader('X-RateLimit-Reset', Math.floor(record.resetAt / 1000));
 
     next();
   } catch (error) {
@@ -204,7 +227,7 @@ const checkRateLimit = async (req, res, next) => {
 /**
  * 试用检查中间件
  */
-const checkTrialUsage = async (req, res, next) => {
+const checkTrialUsage = (req, res, next) => {
   try {
     const user = req.user;
     
@@ -248,16 +271,13 @@ const generateApiKey = (userId, expiresIn = '365d') => {
 /**
  * 撤销API密钥
  */
-const revokeApiKey = async (token) => {
+const revokeApiKey = (token) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    const expiresAt = decoded.exp * 1000;
-    const ttl = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+    const expiresAt = new Date(decoded.exp * 1000).toISOString();
     
     // 将令牌加入撤销列表
-    if (ttl > 0) {
-      await redisClient.setEx(`revoked:${token}`, ttl, '1');
-    }
+    db.revokeToken(token, decoded.userId, expiresAt);
     
     return true;
   } catch (error) {

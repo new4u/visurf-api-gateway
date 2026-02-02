@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViSurf API Gateway - 一键测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .test-section {
+            margin-bottom: 30px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .test-header {
+            background: #f5f5f5;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .test-header:hover {
+            background: #e8e8e8;
+        }
+
+        .test-header h3 {
+            color: #333;
+            font-size: 1.2em;
+        }
+
+        .test-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .status-pending {
+            background: #ffd700;
+            color: #333;
+        }
+
+        .status-running {
+            background: #4a90e2;
+            color: white;
+        }
+
+        .status-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .status-error {
+            background: #f44336;
+            color: white;
+        }
+
+        .test-body {
+            padding: 20px;
+            background: white;
+            display: none;
+        }
+
+        .test-body.active {
+            display: block;
+        }
+
+        .test-result {
+            background: #f9f9f9;
+            border-left: 4px solid #4a90e2;
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .test-result.success {
+            border-left-color: #4caf50;
+            background: #f1f8f4;
+        }
+
+        .test-result.error {
+            border-left-color: #f44336;
+            background: #fef1f1;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .summary h2 {
+            margin-bottom: 15px;
+        }
+
+        .summary-stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .api-key-display {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            word-break: break-all;
+        }
+
+        .api-key-display strong {
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 ViSurf API Gateway</h1>
+            <p>一键测试所有 API 端点</p>
+        </div>
+
+        <div class="content">
+            <div class="summary" id="summary">
+                <h2>测试总览</h2>
+                <div class="summary-stats">
+                    <div class="stat">
+                        <span class="stat-number" id="total-tests">9</span>
+                        <span class="stat-label">总测试数</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="passed-tests">0</span>
+                        <span class="stat-label">通过</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="failed-tests">0</span>
+                        <span class="stat-label">失败</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="success-rate">0%</span>
+                        <span class="stat-label">成功率</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="runAllTests()">▶️ 运行所有测试</button>
+                <button class="btn btn-success" onclick="runQuickTest()">⚡ 快速测试</button>
+                <button class="btn btn-danger" onclick="clearResults()">🗑️ 清除结果</button>
+            </div>
+
+            <div id="tests-container">
+                <!-- Test 1: Health Check -->
+                <div class="test-section" id="test-health">
+                    <div class="test-header" onclick="toggleTest('health')">
+                        <h3>1. 健康检查 (GET /health)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-health">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-health">
+                        <button class="btn btn-secondary" onclick="testHealth()">运行测试</button>
+                        <div class="test-result" id="result-health"></div>
+                    </div>
+                </div>
+
+                <!-- Test 2: User Registration -->
+                <div class="test-section" id="test-register">
+                    <div class="test-header" onclick="toggleTest('register')">
+                        <h3>2. 用户注册 (POST /api/v1/auth/register)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-register">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-register">
+                        <button class="btn btn-secondary" onclick="testRegister()">运行测试</button>
+                        <div class="test-result" id="result-register"></div>
+                    </div>
+                </div>
+
+                <!-- Test 3: User Login -->
+                <div class="test-section" id="test-login">
+                    <div class="test-header" onclick="toggleTest('login')">
+                        <h3>3. 用户登录 (POST /api/v1/auth/login)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-login">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-login">
+                        <button class="btn btn-secondary" onclick="testLogin()">运行测试</button>
+                        <div class="test-result" id="result-login"></div>
+                    </div>
+                </div>
+
+                <!-- Test 4: Get Profile -->
+                <div class="test-section" id="test-profile">
+                    <div class="test-header" onclick="toggleTest('profile')">
+                        <h3>4. 获取用户信息 (GET /api/v1/auth/profile)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-profile">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-profile">
+                        <button class="btn btn-secondary" onclick="testProfile()">运行测试</button>
+                        <div class="test-result" id="result-profile"></div>
+                    </div>
+                </div>
+
+                <!-- Test 5: SVG Render -->
+                <div class="test-section" id="test-render">
+                    <div class="test-header" onclick="toggleTest('render')">
+                        <h3>5. SVG 渲染 (POST /api/v1/render)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-render">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-render">
+                        <button class="btn btn-secondary" onclick="testRender()">运行测试</button>
+                        <div class="test-result" id="result-render"></div>
+                    </div>
+                </div>
+
+                <!-- Test 6: User Stats -->
+                <div class="test-section" id="test-stats">
+                    <div class="test-header" onclick="toggleTest('stats')">
+                        <h3>6. 用户统计 (GET /api/v1/stats)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-stats">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-stats">
+                        <button class="btn btn-secondary" onclick="testStats()">运行测试</button>
+                        <div class="test-result" id="result-stats"></div>
+                    </div>
+                </div>
+
+                <!-- Test 7: Usage History -->
+                <div class="test-section" id="test-usage">
+                    <div class="test-header" onclick="toggleTest('usage')">
+                        <h3>7. 用量历史 (GET /api/v1/stats/usage)</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-usage">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-usage">
+                        <button class="btn btn-secondary" onclick="testUsage()">运行测试</button>
+                        <div class="test-result" id="result-usage"></div>
+                    </div>
+                </div>
+
+                <!-- Test 8: Invalid Token -->
+                <div class="test-section" id="test-invalid">
+                    <div class="test-header" onclick="toggleTest('invalid')">
+                        <h3>8. 无效令牌处理</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-invalid">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-invalid">
+                        <button class="btn btn-secondary" onclick="testInvalidToken()">运行测试</button>
+                        <div class="test-result" id="result-invalid"></div>
+                    </div>
+                </div>
+
+                <!-- Test 9: Missing Auth -->
+                <div class="test-section" id="test-noauth">
+                    <div class="test-header" onclick="toggleTest('noauth')">
+                        <h3>9. 缺失认证处理</h3>
+                        <div class="test-status">
+                            <span class="status-badge status-pending" id="status-noauth">待测试</span>
+                        </div>
+                    </div>
+                    <div class="test-body" id="body-noauth">
+                        <button class="btn btn-secondary" onclick="testNoAuth()">运行测试</button>
+                        <div class="test-result" id="result-noauth"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:4000';
+        let apiKey = '';
+        let testResults = {
+            total: 9,
+            passed: 0,
+            failed: 0
+        };
+
+        function toggleTest(testId) {
+            const body = document.getElementById(`body-${testId}`);
+            body.classList.toggle('active');
+        }
+
+        function updateStatus(testId, status, message) {
+            const statusBadge = document.getElementById(`status-${testId}`);
+            const resultDiv = document.getElementById(`result-${testId}`);
+            
+            statusBadge.className = `status-badge status-${status}`;
+            statusBadge.textContent = status === 'running' ? '运行中...' : 
+                                     status === 'success' ? '✅ 通过' : 
+                                     status === 'error' ? '❌ 失败' : '待测试';
+            
+            if (message) {
+                resultDiv.className = `test-result ${status}`;
+                resultDiv.textContent = message;
+                document.getElementById(`body-${testId}`).classList.add('active');
+            }
+        }
+
+        function updateSummary() {
+            document.getElementById('passed-tests').textContent = testResults.passed;
+            document.getElementById('failed-tests').textContent = testResults.failed;
+            const rate = testResults.total > 0 ? 
+                ((testResults.passed / testResults.total) * 100).toFixed(1) : 0;
+            document.getElementById('success-rate').textContent = rate + '%';
+        }
+
+        async function testHealth() {
+            updateStatus('health', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/health`);
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    testResults.passed++;
+                    updateStatus('health', 'success', 
+                        `✅ 服务器健康\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('health', 'error', 
+                        `❌ 测试失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('health', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testRegister() {
+            updateStatus('register', 'running');
+            try {
+                const email = `test${Date.now()}@example.com`;
+                const response = await fetch(`${BASE_URL}/api/v1/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        password: 'password123',
+                        name: 'Test User'
+                    })
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.data.apiKey) {
+                    apiKey = data.data.apiKey;
+                    testResults.passed++;
+                    updateStatus('register', 'success', 
+                        `✅ 注册成功\n\nEmail: ${email}\nAPI Key: ${apiKey.substring(0, 30)}...\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('register', 'error', 
+                        `❌ 注册失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('register', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testLogin() {
+            updateStatus('login', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.data.apiKey) {
+                    if (!apiKey) apiKey = data.data.apiKey;
+                    testResults.passed++;
+                    updateStatus('login', 'success', 
+                        `✅ 登录成功\n\nUser: ${data.data.name}\nEmail: ${data.data.email}\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('login', 'error', 
+                        `❌ 登录失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('login', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testProfile() {
+            if (!apiKey) {
+                updateStatus('profile', 'error', '❌ 请先登录获取 API Key');
+                return;
+            }
+            
+            updateStatus('profile', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/auth/profile`, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    testResults.passed++;
+                    updateStatus('profile', 'success', 
+                        `✅ 获取成功\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('profile', 'error', 
+                        `❌ 获取失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('profile', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testRender() {
+            if (!apiKey) {
+                updateStatus('render', 'error', '❌ 请先登录获取 API Key');
+                return;
+            }
+            
+            updateStatus('render', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/render`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        entities: [
+                            { id: '1', label: '人工智能', labelEn: 'AI' },
+                            { id: '2', label: '机器学习', labelEn: 'ML' }
+                        ],
+                        relations: [
+                            { source: '1', target: '2', label: '包含' }
+                        ]
+                    })
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.data.svg) {
+                    testResults.passed++;
+                    updateStatus('render', 'success', 
+                        `✅ 渲染成功\n\nSVG 长度: ${data.data.svg.length} 字符\n成本: ¥${data.data.metadata.cost}\n\n${JSON.stringify(data.data.metadata, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('render', 'error', 
+                        `❌ 渲染失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('render', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testStats() {
+            if (!apiKey) {
+                updateStatus('stats', 'error', '❌ 请先登录获取 API Key');
+                return;
+            }
+            
+            updateStatus('stats', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/stats`, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    testResults.passed++;
+                    updateStatus('stats', 'success', 
+                        `✅ 获取成功\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('stats', 'error', 
+                        `❌ 获取失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('stats', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testUsage() {
+            if (!apiKey) {
+                updateStatus('usage', 'error', '❌ 请先登录获取 API Key');
+                return;
+            }
+            
+            updateStatus('usage', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/stats/usage?limit=10`, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    testResults.passed++;
+                    updateStatus('usage', 'success', 
+                        `✅ 获取成功\n\n记录数: ${data.data.count}\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('usage', 'error', 
+                        `❌ 获取失败\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('usage', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testInvalidToken() {
+            updateStatus('invalid', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/auth/profile`, {
+                    headers: { 'Authorization': 'Bearer invalid-token-12345' }
+                });
+                const data = await response.json();
+                
+                if (response.status === 401) {
+                    testResults.passed++;
+                    updateStatus('invalid', 'success', 
+                        `✅ 正确拒绝无效令牌 (401)\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('invalid', 'error', 
+                        `❌ 应该返回 401，实际返回 ${response.status}\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('invalid', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function testNoAuth() {
+            updateStatus('noauth', 'running');
+            try {
+                const response = await fetch(`${BASE_URL}/api/v1/auth/profile`);
+                const data = await response.json();
+                
+                if (response.status === 401) {
+                    testResults.passed++;
+                    updateStatus('noauth', 'success', 
+                        `✅ 正确要求认证 (401)\n\n${JSON.stringify(data, null, 2)}`);
+                } else {
+                    testResults.failed++;
+                    updateStatus('noauth', 'error', 
+                        `❌ 应该返回 401，实际返回 ${response.status}\n\n${JSON.stringify(data, null, 2)}`);
+                }
+            } catch (error) {
+                testResults.failed++;
+                updateStatus('noauth', 'error', `❌ 请求失败: ${error.message}`);
+            }
+            updateSummary();
+        }
+
+        async function runAllTests() {
+            clearResults();
+            await testHealth();
+            await new Promise(r => setTimeout(r, 500));
+            await testRegister();
+            await new Promise(r => setTimeout(r, 500));
+            await testLogin();
+            await new Promise(r => setTimeout(r, 500));
+            await testProfile();
+            await new Promise(r => setTimeout(r, 500));
+            await testRender();
+            await new Promise(r => setTimeout(r, 500));
+            await testStats();
+            await new Promise(r => setTimeout(r, 500));
+            await testUsage();
+            await new Promise(r => setTimeout(r, 500));
+            await testInvalidToken();
+            await new Promise(r => setTimeout(r, 500));
+            await testNoAuth();
+        }
+
+        async function runQuickTest() {
+            clearResults();
+            await testHealth();
+            await new Promise(r => setTimeout(r, 300));
+            await testLogin();
+            await new Promise(r => setTimeout(r, 300));
+            await testProfile();
+            await new Promise(r => setTimeout(r, 300));
+            await testRender();
+        }
+
+        function clearResults() {
+            testResults = { total: 9, passed: 0, failed: 0 };
+            const tests = ['health', 'register', 'login', 'profile', 'render', 'stats', 'usage', 'invalid', 'noauth'];
+            tests.forEach(test => {
+                updateStatus(test, 'pending');
+                document.getElementById(`result-${test}`).textContent = '';
+            });
+            updateSummary();
+        }
+    </script>
+</body>
+</html>

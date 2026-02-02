@@ -8,11 +8,15 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 
-// 数据库和路由
+// 数据库、中间件和路由
 const db = require('./db/sqlite');
+const { authenticateToken } = require('./middleware/auth');
+const { errorHandler, notFoundHandler } = require('./middleware/error');
+const authRouter = require('./routes/auth');
 const renderRouter = require('./routes/render');
 const parseRouter = require('./routes/parse');
 const comboRouter = require('./routes/combo');
+const statsRouter = require('./routes/stats');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -65,46 +69,6 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '10mb' }));
 
-// ============ 认证中间件 ============
-
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({
-      success: false,
-      code: 401,
-      message: 'Access token required',
-      requestId: req.id
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(token, jwtSecret);
-    const user = db.findUserById(decoded.userId);
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        code: 401,
-        message: 'Invalid user',
-        requestId: req.id
-      });
-    }
-
-    req.user = user;
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      success: false,
-      code: 401,
-      message: 'Invalid token',
-      requestId: req.id
-    });
-  }
-};
-
 // ============ 健康检查 ============
 
 app.get('/health', (req, res) => {
@@ -124,172 +88,19 @@ app.get('/health', (req, res) => {
 
 // ============ 认证路由 ============
 
-// 用户注册
-app.post('/api/v1/auth/register', async (req, res) => {
-  try {
-    const { email, password, name } = req.body;
-
-    if (!email || !password || !name) {
-      return res.status(400).json({
-        success: false,
-        code: 400,
-        message: 'Missing required fields: email, password, name',
-        requestId: req.id
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        code: 400,
-        message: 'Password must be at least 6 characters',
-        requestId: req.id
-      });
-    }
-
-    // 检查邮箱是否已存在
-    const existing = db.findUserByEmail(email);
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        code: 409,
-        message: 'Email already exists',
-        requestId: req.id
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 12);
-    const userId = db.createUser(email, name, hashedPassword);
-
-    // 生成 API 密钥 (JWT)
-    const apiKey = jwt.sign({ userId, type: 'api_key' }, jwtSecret, { expiresIn: '365d' });
-    db.saveApiKey(userId, apiKey);
-
-    logger.info(`User registered: ${email}`);
-
-    res.status(201).json({
-      success: true,
-      code: 201,
-      message: 'User registered successfully',
-      data: {
-        userId,
-        email,
-        name,
-        plan: 'free',
-        apiKey
-      },
-      requestId: req.id
-    });
-
-  } catch (error) {
-    logger.error(`Register error: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      code: 500,
-      message: 'Registration failed',
-      requestId: req.id
-    });
-  }
-});
-
-// 用户登录
-app.post('/api/v1/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        code: 400,
-        message: 'Missing email or password',
-        requestId: req.id
-      });
-    }
-
-    const user = db.findUserByEmail(email);
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({
-        success: false,
-        code: 401,
-        message: 'Invalid credentials',
-        requestId: req.id
-      });
-    }
-
-    const apiKey = db.getApiKey(user.id) ||
-      jwt.sign({ userId: user.id, type: 'api_key' }, jwtSecret, { expiresIn: '365d' });
-
-    res.json({
-      success: true,
-      code: 200,
-      message: 'Login successful',
-      data: {
-        userId: user.id,
-        email: user.email,
-        name: user.name,
-        plan: user.plan,
-        apiKey,
-        apiCalls: user.api_calls,
-        totalSpent: user.total_spent
-      },
-      requestId: req.id
-    });
-
-  } catch (error) {
-    logger.error(`Login error: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      code: 500,
-      message: 'Login failed',
-      requestId: req.id
-    });
-  }
-});
-
-// 获取用户信息
-app.get('/api/v1/auth/profile', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    code: 200,
-    message: 'User profile retrieved successfully',
-    data: {
-      userId: req.user.id,
-      email: req.user.email,
-      name: req.user.name,
-      plan: req.user.plan,
-      apiCalls: req.user.api_calls,
-      totalSpent: req.user.total_spent
-    },
-    requestId: req.id
-  });
-});
+app.use('/api/v1/auth', authRouter);
 
 // ============ 核心 API 路由 ============
 
 app.use('/api/v1/render', authenticateToken, renderRouter);
 app.use('/api/v1/parse', authenticateToken, parseRouter);
 app.use('/api/v1/combo', authenticateToken, comboRouter);
+app.use('/api/v1/stats', authenticateToken, statsRouter);
 
 // ============ 404 和错误处理 ============
 
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    code: 404,
-    message: 'API endpoint not found',
-    requestId: req.id
-  });
-});
-
-app.use((err, req, res, next) => {
-  logger.error(`Server error: ${err.message}`);
-  res.status(500).json({
-    success: false,
-    code: 500,
-    message: 'Internal server error',
-    requestId: req.id
-  });
-});
+app.use('*', notFoundHandler);
+app.use(errorHandler);
 
 // ============ 启动服务器 ============
 
@@ -299,12 +110,15 @@ app.listen(PORT, () => {
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Health check: http://localhost:${PORT}/health`);
   logger.info(`API endpoints:`);
-  logger.info(`  POST /api/v1/render  (JSON -> SVG)`);
-  logger.info(`  POST /api/v1/parse   (Text -> JSON)`);
-  logger.info(`  POST /api/v1/combo   (Text -> SVG)`);
-  logger.info(`  POST /api/v1/auth/register`);
-  logger.info(`  POST /api/v1/auth/login`);
-  logger.info(`  GET  /api/v1/auth/profile`);
+  logger.info(`  POST /api/v1/render              (JSON -> SVG)`);
+  logger.info(`  POST /api/v1/parse               (Text -> JSON)`);
+  logger.info(`  POST /api/v1/combo               (Text -> SVG)`);
+  logger.info(`  POST /api/v1/auth/register       (User registration)`);
+  logger.info(`  POST /api/v1/auth/login          (User login)`);
+  logger.info(`  GET  /api/v1/auth/profile        (Get user profile)`);
+  logger.info(`  POST /api/v1/auth/refresh-apikey (Refresh API key)`);
+  logger.info(`  GET  /api/v1/stats               (User statistics)`);
+  logger.info(`  GET  /api/v1/stats/usage         (Usage history)`);
 });
 
 module.exports = app;

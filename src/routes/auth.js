@@ -1,20 +1,10 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
-const Redis = require('redis');
+const db = require('../db/sqlite');
+const { generateApiKey, revokeApiKey, authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
-const redisClient = Redis.createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
-
-redisClient.on('error', (err) => {
-  console.error('Redis连接错误:', err);
-});
-
-redisClient.connect();
 
 /**
  * 用户注册
@@ -40,11 +30,10 @@ router.post('/register', [
     }
 
     const { email, password, name, company = '', phone = '' } = req.body;
-    const userId = uuidv4();
     
     // 检查邮箱是否已存在
-    const existingUser = await redisClient.hGetAll(`user:email:${email}`);
-    if (existingUser && existingUser.id) {
+    const existingUser = db.findUserByEmail(email);
+    if (existingUser) {
       return res.status(409).json({
         success: false,
         code: 409,
@@ -60,39 +49,19 @@ router.post('/register', [
     // 密码加密
     const hashedPassword = await bcrypt.hash(password, 12);
     
-    // 创建用户数据
-    const userData = {
-      id: userId,
-      email,
-      name,
-      company,
-      phone,
-      password: hashedPassword,
-      plan: 'free',
-      status: 'active',
-      trialUsed: 'false',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      apiCalls: '0',
-      totalSpent: '0'
-    };
-
-    // 保存用户信息
-    await redisClient.hSet(`user:${userId}`, userData);
-    await redisClient.hSet(`user:email:${email}`, { id: userId });
+    // 创建用户
+    const userId = db.createUser(email, name, hashedPassword);
+    
+    // 更新额外信息
+    if (company || phone) {
+      db.updateUser(userId, { company, phone });
+    }
     
     // 生成API密钥
-    const apiKey = jwt.sign(
-      { userId, type: 'api_key' },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '365d' }
-    );
+    const apiKey = generateApiKey(userId);
     
     // 保存API密钥
-    await redisClient.setEx(`apikey:${userId}`, 365 * 24 * 60 * 60, apiKey);
-
-    // 记录注册统计
-    await redisClient.incr('stats:registrations');
+    db.saveApiKey(userId, apiKey);
 
     res.status(201).json({
       success: true,
@@ -149,24 +118,9 @@ router.post('/login', [
     const { email, password } = req.body;
     
     // 查找用户
-    const emailMapping = await redisClient.hGetAll(`user:email:${email}`);
-    if (!emailMapping || !emailMapping.id) {
-      return res.status(401).json({
-        success: false,
-        code: 401,
-        message: 'Invalid credentials',
-        error: {
-          type: 'INVALID_CREDENTIALS',
-          details: 'Email or password is incorrect'
-        },
-        requestId: req.id
-      });
-    }
-
-    const userId = emailMapping.id;
-    const user = await redisClient.hGetAll(`user:${userId}`);
+    const user = db.findUserByEmail(email);
     
-    if (!user || !user.id) {
+    if (!user) {
       return res.status(401).json({
         success: false,
         code: 401,
@@ -209,20 +163,15 @@ router.post('/login', [
     }
 
     // 获取API密钥
-    let apiKey = await redisClient.get(`apikey:${userId}`);
+    let apiKey = db.getApiKey(user.id);
     if (!apiKey) {
       // 生成新的API密钥
-      apiKey = jwt.sign(
-        { userId: user.id, type: 'api_key' },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '365d' }
-      );
-      await redisClient.setEx(`apikey:${userId}`, 365 * 24 * 60 * 60, apiKey);
+      apiKey = generateApiKey(user.id);
+      db.saveApiKey(user.id, apiKey);
     }
 
-    // 记录登录统计
-    await redisClient.incr('stats:logins');
-    await redisClient.hSet(`user:${userId}`, 'lastLogin', new Date().toISOString());
+    // 记录登录时间
+    db.updateLastLogin(user.id);
 
     res.json({
       success: true,
@@ -235,9 +184,9 @@ router.post('/login', [
         plan: user.plan,
         company: user.company,
         apiKey,
-        trialUsed: user.trialUsed === 'true',
-        apiCalls: parseInt(user.apiCalls) || 0,
-        totalSpent: parseFloat(user.totalSpent) || 0
+        trialUsed: user.trial_used === 1,
+        apiCalls: user.api_calls || 0,
+        totalSpent: user.total_spent || 0
       },
       requestId: req.id
     });
@@ -260,33 +209,23 @@ router.post('/login', [
 /**
  * 刷新API密钥
  */
-router.post('/refresh-apikey', async (req, res) => {
+router.post('/refresh-apikey', authenticateToken, (req, res) => {
   try {
     const userId = req.user.id;
     
     // 获取旧的API密钥
-    const oldApiKey = await redisClient.get(`apikey:${userId}`);
+    const oldApiKey = db.getApiKey(userId);
     
     // 生成新的API密钥
-    const newApiKey = jwt.sign(
-      { userId, type: 'api_key' },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '365d' }
-    );
+    const newApiKey = generateApiKey(userId);
     
     // 撤销旧的API密钥（如果存在）
     if (oldApiKey) {
-      const decoded = jwt.verify(oldApiKey, process.env.JWT_SECRET || 'your-secret-key');
-      const expiresAt = decoded.exp * 1000;
-      const ttl = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
-      
-      if (ttl > 0) {
-        await redisClient.setEx(`revoked:${oldApiKey}`, ttl, '1');
-      }
+      revokeApiKey(oldApiKey);
     }
     
     // 保存新的API密钥
-    await redisClient.setEx(`apikey:${userId}`, 365 * 24 * 60 * 60, newApiKey);
+    db.saveApiKey(userId, newApiKey);
     
     res.json({
       success: true,
@@ -317,12 +256,27 @@ router.post('/refresh-apikey', async (req, res) => {
 /**
  * 获取用户信息
  */
-router.get('/profile', async (req, res) => {
+router.get('/profile', authenticateToken, (req, res) => {
   try {
-    const userId = req.user.id;
-    const user = await redisClient.hGetAll(`user:${userId}`);
+    console.log('Profile route - req.user:', req.user);
     
-    if (!user || !user.id) {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        code: 401,
+        message: 'Authentication required',
+        error: {
+          type: 'NO_USER',
+          details: 'User not authenticated'
+        },
+        requestId: req.id
+      });
+    }
+    
+    const userId = req.user.id;
+    const user = db.findUserById(userId);
+    
+    if (!user) {
       return res.status(404).json({
         success: false,
         code: 404,
@@ -347,11 +301,11 @@ router.get('/profile', async (req, res) => {
         phone: user.phone,
         plan: user.plan,
         status: user.status,
-        trialUsed: user.trialUsed === 'true',
-        createdAt: user.createdAt,
-        lastLogin: user.lastLogin,
-        apiCalls: parseInt(user.apiCalls) || 0,
-        totalSpent: parseFloat(user.totalSpent) || 0
+        trialUsed: user.trial_used === 1,
+        createdAt: user.created_at,
+        lastLogin: user.last_login,
+        apiCalls: user.api_calls || 0,
+        totalSpent: user.total_spent || 0
       },
       requestId: req.id
     });

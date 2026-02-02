@@ -29,8 +29,12 @@ function initDatabase() {
       password TEXT NOT NULL,
       plan TEXT DEFAULT 'free',
       status TEXT DEFAULT 'active',
+      trial_used INTEGER DEFAULT 0,
+      company TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
       api_calls INTEGER DEFAULT 0,
       total_spent REAL DEFAULT 0,
+      last_login TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -50,8 +54,16 @@ function initDatabase() {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS revoked_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id),
+      revoked_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_revoked_expires ON revoked_tokens(expires_at);
   `);
 
   return db;
@@ -117,6 +129,86 @@ function getUserUsage(userId, limit = 50) {
   ).all(userId, limit);
 }
 
+// ============ 撤销令牌操作 ============
+
+function revokeToken(token, userId, expiresAt) {
+  getDb().prepare(
+    'INSERT OR REPLACE INTO revoked_tokens (token, user_id, expires_at) VALUES (?, ?, ?)'
+  ).run(token, userId, expiresAt);
+}
+
+function isTokenRevoked(token) {
+  const row = getDb().prepare('SELECT 1 FROM revoked_tokens WHERE token = ?').get(token);
+  return !!row;
+}
+
+function cleanExpiredTokens() {
+  const now = new Date().toISOString();
+  getDb().prepare('DELETE FROM revoked_tokens WHERE expires_at < ?').run(now);
+}
+
+// ============ 用户更新操作 ============
+
+function updateUser(userId, updates) {
+  const fields = [];
+  const values = [];
+  
+  for (const [key, value] of Object.entries(updates)) {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  }
+  
+  if (fields.length === 0) return;
+  
+  fields.push('updated_at = datetime(\'now\')');
+  values.push(userId);
+  
+  const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+  getDb().prepare(sql).run(...values);
+}
+
+function updateLastLogin(userId) {
+  getDb().prepare(
+    'UPDATE users SET last_login = datetime(\'now\') WHERE id = ?'
+  ).run(userId);
+}
+
+function markTrialUsed(userId) {
+  getDb().prepare(
+    'UPDATE users SET trial_used = 1, updated_at = datetime(\'now\') WHERE id = ?'
+  ).run(userId);
+}
+
+// ============ 统计查询 ============
+
+function getUserStats(userId) {
+  const user = findUserById(userId);
+  if (!user) return null;
+  
+  const usageStats = getDb().prepare(`
+    SELECT 
+      service,
+      COUNT(*) as count,
+      SUM(cost) as total_cost
+    FROM usage_log 
+    WHERE user_id = ?
+    GROUP BY service
+  `).all(userId);
+  
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      plan: user.plan,
+      apiCalls: user.api_calls,
+      totalSpent: user.total_spent,
+      trialUsed: user.trial_used === 1
+    },
+    usageByService: usageStats
+  };
+}
+
 module.exports = {
   initDatabase,
   getDb,
@@ -124,8 +216,15 @@ module.exports = {
   findUserByEmail,
   findUserById,
   updateUserStats,
+  updateUser,
+  updateLastLogin,
+  markTrialUsed,
   saveApiKey,
   getApiKey,
   logUsage,
-  getUserUsage
+  getUserUsage,
+  getUserStats,
+  revokeToken,
+  isTokenRevoked,
+  cleanExpiredTokens
 };
