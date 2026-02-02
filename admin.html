@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 管理后台 - ViSurf Gateway</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 30px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+
+    .header h1 {
+      color: #667eea;
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 16px;
+    }
+
+    .api-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .api-card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+
+    .api-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+    }
+
+    .api-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    .api-name {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .api-status {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-enabled {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-disabled {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .api-info {
+      margin-bottom: 20px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .info-label {
+      color: #666;
+      font-weight: 500;
+    }
+
+    .info-value {
+      color: #333;
+      font-weight: 600;
+    }
+
+    .endpoint {
+      font-family: 'Courier New', monospace;
+      background: #f8f9fa;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .cost-input-group {
+      margin-top: 20px;
+    }
+
+    .cost-input-group label {
+      display: block;
+      color: #666;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .input-with-button {
+      display: flex;
+      gap: 10px;
+    }
+
+    .cost-input {
+      flex: 1;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    .cost-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .description {
+      color: #666;
+      font-size: 14px;
+      line-height: 1.6;
+      margin-top: 15px;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: white;
+      font-size: 18px;
+    }
+
+    .error {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .success {
+      background: #d4edda;
+      color: #155724;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .stats-card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      margin-bottom: 30px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .stat-item {
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 8px;
+      color: white;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .api-card {
+      animation: fadeIn 0.5s ease-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎛️ API 管理后台</h1>
+      <p>实时查看和修改 API 配置参数</p>
+    </div>
+
+    <div id="message"></div>
+
+    <div class="stats-card">
+      <h2 style="color: #333; margin-bottom: 10px;">📊 系统统计</h2>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="totalApis">-</div>
+          <div class="stat-label">API 总数</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="enabledApis">-</div>
+          <div class="stat-label">启用中</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="avgCost">-</div>
+          <div class="stat-label">平均费用</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="loading" class="loading">
+      <div>⏳ 加载中...</div>
+    </div>
+
+    <div id="apiGrid" class="api-grid" style="display: none;"></div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:4000/api/v1/admin';
+    let configs = [];
+
+    // 加载所有 API 配置
+    async function loadConfigs() {
+      try {
+        const response = await fetch(`${API_BASE}/configs`);
+        const result = await response.json();
+        
+        if (result.success) {
+          configs = result.data.configs;
+          renderConfigs();
+          updateStats();
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('apiGrid').style.display = 'grid';
+        } else {
+          showMessage('加载失败: ' + result.message, 'error');
+        }
+      } catch (error) {
+        showMessage('网络错误: ' + error.message, 'error');
+      }
+    }
+
+    // 渲染 API 配置卡片
+    function renderConfigs() {
+      const grid = document.getElementById('apiGrid');
+      grid.innerHTML = '';
+
+      configs.forEach(config => {
+        const card = document.createElement('div');
+        card.className = 'api-card';
+        card.innerHTML = `
+          <div class="api-header">
+            <div class="api-name">${config.name}</div>
+            <span class="api-status ${config.enabled ? 'status-enabled' : 'status-disabled'}">
+              ${config.enabled ? '✓ 启用' : '✗ 禁用'}
+            </span>
+          </div>
+
+          <div class="api-info">
+            <div class="info-row">
+              <span class="info-label">API ID:</span>
+              <span class="info-value">${config.id}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">端点:</span>
+              <span class="endpoint">${config.endpoint}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">当前费用:</span>
+              <span class="info-value" style="color: #667eea; font-size: 18px;">¥${config.cost.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div class="description">
+            ${config.description || '暂无描述'}
+          </div>
+
+          <div class="cost-input-group">
+            <label>修改费用 (元/次):</label>
+            <div class="input-with-button">
+              <input 
+                type="number" 
+                class="cost-input" 
+                id="cost-${config.id}"
+                value="${config.cost}"
+                step="0.01"
+                min="0"
+                placeholder="输入新费用"
+              />
+              <button class="btn btn-primary" onclick="updateCost('${config.id}')">
+                💾 保存
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <button 
+              class="btn ${config.enabled ? 'btn-danger' : 'btn-success'}" 
+              onclick="toggleStatus('${config.id}', ${!config.enabled})"
+              style="flex: 1;"
+            >
+              ${config.enabled ? '🚫 禁用' : '✅ 启用'}
+            </button>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // 更新统计数据
+    function updateStats() {
+      const total = configs.length;
+      const enabled = configs.filter(c => c.enabled).length;
+      const avgCost = configs.reduce((sum, c) => sum + c.cost, 0) / total;
+
+      document.getElementById('totalApis').textContent = total;
+      document.getElementById('enabledApis').textContent = enabled;
+      document.getElementById('avgCost').textContent = '¥' + avgCost.toFixed(2);
+    }
+
+    // 更新费用
+    async function updateCost(id) {
+      const input = document.getElementById(`cost-${id}`);
+      const newCost = parseFloat(input.value);
+
+      if (isNaN(newCost) || newCost < 0) {
+        showMessage('请输入有效的费用金额', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/configs/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ cost: newCost })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          showMessage(`✅ ${result.data.name} 费用已更新为 ¥${newCost.toFixed(2)}`, 'success');
+          await loadConfigs();
+        } else {
+          showMessage('更新失败: ' + result.message, 'error');
+        }
+      } catch (error) {
+        showMessage('网络错误: ' + error.message, 'error');
+      }
+    }
+
+    // 切换启用/禁用状态
+    async function toggleStatus(id, enabled) {
+      try {
+        const response = await fetch(`${API_BASE}/configs/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ enabled: enabled ? 1 : 0 })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          showMessage(`✅ ${result.data.name} 已${enabled ? '启用' : '禁用'}`, 'success');
+          await loadConfigs();
+        } else {
+          showMessage('更新失败: ' + result.message, 'error');
+        }
+      } catch (error) {
+        showMessage('网络错误: ' + error.message, 'error');
+      }
+    }
+
+    // 显示消息
+    function showMessage(text, type) {
+      const messageDiv = document.getElementById('message');
+      messageDiv.className = type;
+      messageDiv.textContent = text;
+      messageDiv.style.display = 'block';
+
+      setTimeout(() => {
+        messageDiv.style.display = 'none';
+      }, 3000);
+    }
+
+    // 页面加载时获取配置
+    window.addEventListener('DOMContentLoaded', loadConfigs);
+  </script>
+</body>
+</html>

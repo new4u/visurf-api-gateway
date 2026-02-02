@@ -6,7 +6,7 @@ const express = require('express');
 const router = express.Router();
 const { extractKnowledgeGraph } = require('../services/parseService');
 const { render } = require('../services/renderService');
-const { updateUserStats, logUsage } = require('../db/sqlite');
+const { updateUserStats, logUsage, getApiConfig } = require('../db/sqlite');
 
 router.post('/', async (req, res) => {
   try {
@@ -45,8 +45,10 @@ router.post('/', async (req, res) => {
       displayLanguage: options.displayLanguage
     });
 
-    // 计费: ¥0.12/次 (组合优惠)
-    const cost = 0.12;
+    // 从数据库读取计费配置
+    const apiConfig = getApiConfig('combo');
+    const cost = apiConfig ? apiConfig.cost : 0.12; // 默认 0.12
+    
     if (req.user) {
       updateUserStats(req.user.id, cost);
       logUsage(req.user.id, 'combo', cost, {

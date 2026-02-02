@@ -17,6 +17,7 @@ const renderRouter = require('./routes/render');
 const parseRouter = require('./routes/parse');
 const comboRouter = require('./routes/combo');
 const statsRouter = require('./routes/stats');
+const adminRouter = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -96,6 +97,7 @@ app.use('/api/v1/render', authenticateToken, renderRouter);
 app.use('/api/v1/parse', authenticateToken, parseRouter);
 app.use('/api/v1/combo', authenticateToken, comboRouter);
 app.use('/api/v1/stats', authenticateToken, statsRouter);
+app.use('/api/v1/admin', adminRouter);
 
 // ============ 404 和错误处理 ============
 

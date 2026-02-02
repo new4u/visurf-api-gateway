@@ -57,14 +57,42 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS revoked_tokens (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id),
-      revoked_at TEXT DEFAULT (datetime('now')),
-      expires_at TEXT NOT NULL
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS api_config (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      cost REAL NOT NULL,
+      description TEXT,
+      enabled INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_revoked_expires ON revoked_tokens(expires_at);
   `);
+
+  // 初始化默认 API 配置
+  const defaultConfigs = [
+    { id: 'render', name: 'SVG 渲染', endpoint: '/api/v1/render', cost: 0.05, description: '将实体关系数据渲染为 SVG 图形' },
+    { id: 'parse', name: '文本解析', endpoint: '/api/v1/parse', cost: 0.10, description: '从文本中提取知识图谱' },
+    { id: 'combo', name: '组合服务', endpoint: '/api/v1/combo', cost: 0.12, description: '文本解析 + SVG 渲染一站式服务' }
+  ];
+
+  const checkConfig = db.prepare('SELECT COUNT(*) as count FROM api_config').get();
+  if (checkConfig.count === 0) {
+    const insertConfig = db.prepare(
+      'INSERT INTO api_config (id, name, endpoint, cost, description) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (const config of defaultConfigs) {
+      insertConfig.run(config.id, config.name, config.endpoint, config.cost, config.description);
+    }
+  }
 
   return db;
 }
@@ -167,6 +195,37 @@ function updateUser(userId, updates) {
   getDb().prepare(sql).run(...values);
 }
 
+// ============ API 配置操作 ============
+
+function getAllApiConfigs() {
+  return getDb().prepare('SELECT * FROM api_config ORDER BY id').all();
+}
+
+function getApiConfig(id) {
+  return getDb().prepare('SELECT * FROM api_config WHERE id = ?').get(id);
+}
+
+function updateApiConfig(id, updates) {
+  const fields = [];
+  const values = [];
+  
+  for (const [key, value] of Object.entries(updates)) {
+    if (['name', 'endpoint', 'cost', 'description', 'enabled'].includes(key)) {
+      fields.push(`${key} = ?`);
+      values.push(value);
+    }
+  }
+  
+  if (fields.length === 0) return false;
+  
+  fields.push('updated_at = datetime(\'now\')');
+  values.push(id);
+  
+  const sql = `UPDATE api_config SET ${fields.join(', ')} WHERE id = ?`;
+  const result = getDb().prepare(sql).run(...values);
+  return result.changes > 0;
+}
+
 function updateLastLogin(userId) {
   getDb().prepare(
     'UPDATE users SET last_login = datetime(\'now\') WHERE id = ?'
@@ -226,5 +285,8 @@ module.exports = {
   getUserStats,
   revokeToken,
   isTokenRevoked,
-  cleanExpiredTokens
+  cleanExpiredTokens,
+  getAllApiConfigs,
+  getApiConfig,
+  updateApiConfig
 };

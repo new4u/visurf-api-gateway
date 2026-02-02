@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { extractKnowledgeGraph } = require('../services/parseService');
-const { updateUserStats, logUsage } = require('../db/sqlite');
+const { updateUserStats, logUsage, getApiConfig } = require('../db/sqlite');
 
 router.post('/', async (req, res) => {
   try {
@@ -32,8 +32,10 @@ router.post('/', async (req, res) => {
 
     const result = await extractKnowledgeGraph(text, options);
 
-    // 计费: ¥0.10/次
-    const cost = 0.10;
+    // 从数据库读取计费配置
+    const apiConfig = getApiConfig('parse');
+    const cost = apiConfig ? apiConfig.cost : 0.10; // 默认 0.10
+    
     if (req.user) {
       updateUserStats(req.user.id, cost);
       logUsage(req.user.id, 'parse', cost, {

@@ -5,7 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { render } = require('../services/renderService');
-const { updateUserStats, logUsage } = require('../db/sqlite');
+const { updateUserStats, logUsage, getApiConfig } = require('../db/sqlite');
 
 router.post('/', (req, res) => {
   try {
@@ -31,8 +31,10 @@ router.post('/', (req, res) => {
 
     const result = render(entities, relations, options);
 
-    // 计费: ¥0.05/次
-    const cost = 0.05;
+    // 从数据库读取计费配置
+    const apiConfig = getApiConfig('render');
+    const cost = apiConfig ? apiConfig.cost : 0.05; // 默认 0.05
+    
     if (req.user) {
       updateUserStats(req.user.id, cost);
       logUsage(req.user.id, 'render', cost, {
