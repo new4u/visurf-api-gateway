@@ -29,8 +29,10 @@
     "morgan": "^1.10.0",
     "redis": "^4.6.0",
     "uuid": "^9.0.1",
-    "visurf-svg-api": "github:new4u/visurf-svg-api",
     "winston": "^3.11.0"
+  },
+  "optionalDependencies": {
+    "visurf-svg-api": "github:new4u/visurf-svg-api"
   },
   "devDependencies": {
     "eslint": "^8.54.0",
