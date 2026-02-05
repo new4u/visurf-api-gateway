@@ -8,6 +8,9 @@ const { render } = require('../services/renderService');
 const { updateUserStats, logUsage, getApiConfig } = require('../db/sqlite');
 
 router.post('/', (req, res) => {
+  const startTime = new Date();
+  const startTimeISO = startTime.toISOString();
+  
   try {
     const { entities, relations, options = {} } = req.body;
 
@@ -31,16 +34,37 @@ router.post('/', (req, res) => {
 
     const result = render(entities, relations, options);
 
+    // 计算执行时间
+    const endTime = new Date();
+    const endTimeISO = endTime.toISOString();
+    const durationMs = endTime - startTime;
+    const durationSeconds = durationMs / 1000;
+
     // 从数据库读取计费配置
     const apiConfig = getApiConfig('render');
-    const cost = apiConfig ? apiConfig.cost : 0.05; // 默认 0.05
+    let cost = 0;
+    
+    if (apiConfig) {
+      if (apiConfig.billing_mode === 'per_time') {
+        // 按时间计费：单价(元/秒) * 执行时间(秒)
+        cost = (apiConfig.time_unit_price || 0.01) * durationSeconds;
+      } else {
+        // 按次计费
+        cost = apiConfig.cost || 0.05;
+      }
+    } else {
+      cost = 0.05; // 默认值
+    }
     
     if (req.user) {
       updateUserStats(req.user.id, cost);
       logUsage(req.user.id, 'render', cost, {
         nodeCount: entities.length,
-        relationCount: relations.length
-      });
+        relationCount: relations.length,
+        durationMs,
+        durationSeconds: durationSeconds.toFixed(3),
+        billingMode: apiConfig?.billing_mode || 'per_call'
+      }, startTimeISO, endTimeISO, durationMs);
     }
 
     res.json({

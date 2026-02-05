@@ -50,6 +50,9 @@ function initDatabase() {
       user_id TEXT NOT NULL REFERENCES users(id),
       service TEXT NOT NULL,
       cost REAL DEFAULT 0,
+      start_time TEXT,
+      end_time TEXT,
+      duration_ms INTEGER DEFAULT 0,
       metadata TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
@@ -66,31 +69,98 @@ function initDatabase() {
       name TEXT NOT NULL,
       endpoint TEXT NOT NULL,
       cost REAL NOT NULL,
+      billing_mode TEXT DEFAULT 'per_call',
+      time_unit_price REAL DEFAULT 0,
       description TEXT,
       enabled INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS worker_nodes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER NOT NULL,
+      service_type TEXT NOT NULL,
+      status TEXT DEFAULT 'online',
+      weight INTEGER DEFAULT 1,
+      max_connections INTEGER DEFAULT 100,
+      current_connections INTEGER DEFAULT 0,
+      total_requests INTEGER DEFAULT 0,
+      failed_requests INTEGER DEFAULT 0,
+      avg_response_time REAL DEFAULT 0,
+      cpu_usage REAL DEFAULT 0,
+      memory_usage REAL DEFAULT 0,
+      last_heartbeat TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS worker_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      worker_id TEXT NOT NULL REFERENCES worker_nodes(id),
+      requests INTEGER DEFAULT 0,
+      success INTEGER DEFAULT 0,
+      failed INTEGER DEFAULT 0,
+      avg_time REAL DEFAULT 0,
+      timestamp TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_revoked_expires ON revoked_tokens(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_worker_service ON worker_nodes(service_type);
+    CREATE INDEX IF NOT EXISTS idx_worker_status ON worker_nodes(status);
+    CREATE INDEX IF NOT EXISTS idx_worker_stats_worker ON worker_stats(worker_id);
   `);
 
   // 初始化默认 API 配置
   const defaultConfigs = [
-    { id: 'render', name: 'SVG 渲染', endpoint: '/api/v1/render', cost: 0.05, description: '将实体关系数据渲染为 SVG 图形' },
-    { id: 'parse', name: '文本解析', endpoint: '/api/v1/parse', cost: 0.10, description: '从文本中提取知识图谱' },
-    { id: 'combo', name: '组合服务', endpoint: '/api/v1/combo', cost: 0.12, description: '文本解析 + SVG 渲染一站式服务' }
+    { 
+      id: 'render', 
+      name: 'SVG 渲染', 
+      endpoint: '/api/v1/render', 
+      cost: 0.05, 
+      billing_mode: 'per_time',
+      time_unit_price: 0.01,
+      description: '将实体关系数据渲染为 SVG 图形，按执行时间计费 ¥0.01/秒' 
+    },
+    { 
+      id: 'parse', 
+      name: '文本解析', 
+      endpoint: '/api/v1/parse', 
+      cost: 0.10, 
+      billing_mode: 'per_time',
+      time_unit_price: 0.02,
+      description: '从文本中提取知识图谱，按执行时间计费 ¥0.02/秒' 
+    },
+    { 
+      id: 'combo', 
+      name: '组合服务', 
+      endpoint: '/api/v1/combo', 
+      cost: 0.12, 
+      billing_mode: 'per_time',
+      time_unit_price: 0.03,
+      description: '文本解析 + SVG 渲染一站式服务，按执行时间计费 ¥0.03/秒' 
+    }
   ];
 
   const checkConfig = db.prepare('SELECT COUNT(*) as count FROM api_config').get();
   if (checkConfig.count === 0) {
     const insertConfig = db.prepare(
-      'INSERT INTO api_config (id, name, endpoint, cost, description) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO api_config (id, name, endpoint, cost, billing_mode, time_unit_price, description) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     for (const config of defaultConfigs) {
-      insertConfig.run(config.id, config.name, config.endpoint, config.cost, config.description);
+      insertConfig.run(
+        config.id, 
+        config.name, 
+        config.endpoint, 
+        config.cost, 
+        config.billing_mode,
+        config.time_unit_price,
+        config.description
+      );
     }
   }
 
@@ -145,10 +215,18 @@ function getApiKey(userId) {
 
 // ============ 用量日志 ============
 
-function logUsage(userId, service, cost, metadata) {
+function logUsage(userId, service, cost, metadata, startTime, endTime, durationMs) {
   getDb().prepare(
-    'INSERT INTO usage_log (user_id, service, cost, metadata) VALUES (?, ?, ?, ?)'
-  ).run(userId, service, cost, JSON.stringify(metadata || {}));
+    'INSERT INTO usage_log (user_id, service, cost, start_time, end_time, duration_ms, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(
+    userId, 
+    service, 
+    cost, 
+    startTime || new Date().toISOString(),
+    endTime || new Date().toISOString(),
+    durationMs || 0,
+    JSON.stringify(metadata || {})
+  );
 }
 
 function getUserUsage(userId, limit = 50) {
@@ -210,7 +288,7 @@ function updateApiConfig(id, updates) {
   const values = [];
   
   for (const [key, value] of Object.entries(updates)) {
-    if (['name', 'endpoint', 'cost', 'description', 'enabled'].includes(key)) {
+    if (['name', 'endpoint', 'cost', 'billing_mode', 'time_unit_price', 'description', 'enabled'].includes(key)) {
       fields.push(`${key} = ?`);
       values.push(value);
     }
@@ -268,6 +346,133 @@ function getUserStats(userId) {
   };
 }
 
+// ============ 工作节点管理 ============
+
+function registerWorker(workerData) {
+  const { id, name, host, port, serviceType, weight = 1 } = workerData;
+  const now = new Date().toISOString();
+  
+  getDb().prepare(`
+    INSERT OR REPLACE INTO worker_nodes 
+    (id, name, host, port, service_type, weight, status, last_heartbeat, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'online', ?, datetime('now'), datetime('now'))
+  `).run(id, name, host, port, serviceType, weight, now);
+  
+  return { id, name, host, port, serviceType, weight };
+}
+
+function updateWorkerHeartbeat(workerId, stats = {}) {
+  const now = new Date().toISOString();
+  const { currentConnections, cpuUsage, memoryUsage, status = 'online' } = stats;
+  
+  getDb().prepare(`
+    UPDATE worker_nodes 
+    SET last_heartbeat = ?,
+        current_connections = COALESCE(?, current_connections),
+        cpu_usage = COALESCE(?, cpu_usage),
+        memory_usage = COALESCE(?, memory_usage),
+        status = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(now, currentConnections, cpuUsage, memoryUsage, status, workerId);
+}
+
+function getWorkersByService(serviceType) {
+  return getDb().prepare(`
+    SELECT * FROM worker_nodes 
+    WHERE service_type = ? AND status = 'online'
+    ORDER BY current_connections ASC, avg_response_time ASC
+  `).all(serviceType);
+}
+
+function getAllWorkers() {
+  return getDb().prepare('SELECT * FROM worker_nodes ORDER BY service_type, name').all();
+}
+
+function getWorkerById(workerId) {
+  return getDb().prepare('SELECT * FROM worker_nodes WHERE id = ?').get(workerId);
+}
+
+function updateWorkerConnections(workerId, delta) {
+  getDb().prepare(`
+    UPDATE worker_nodes 
+    SET current_connections = current_connections + ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(delta, workerId);
+}
+
+function updateWorkerStats(workerId, responseTime, success = true) {
+  const db = getDb();
+  
+  // 更新节点统计
+  const worker = db.prepare('SELECT * FROM worker_nodes WHERE id = ?').get(workerId);
+  if (!worker) return;
+  
+  const totalRequests = worker.total_requests + 1;
+  const failedRequests = success ? worker.failed_requests : worker.failed_requests + 1;
+  const avgResponseTime = (worker.avg_response_time * worker.total_requests + responseTime) / totalRequests;
+  
+  db.prepare(`
+    UPDATE worker_nodes 
+    SET total_requests = ?,
+        failed_requests = ?,
+        avg_response_time = ?,
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(totalRequests, failedRequests, avgResponseTime, workerId);
+  
+  // 记录历史统计
+  db.prepare(`
+    INSERT INTO worker_stats (worker_id, requests, success, failed, avg_time)
+    VALUES (?, 1, ?, ?, ?)
+  `).run(workerId, success ? 1 : 0, success ? 0 : 1, responseTime);
+}
+
+function markWorkerOffline(workerId) {
+  getDb().prepare(`
+    UPDATE worker_nodes 
+    SET status = 'offline',
+        updated_at = datetime('now')
+    WHERE id = ?
+  `).run(workerId);
+}
+
+function removeWorker(workerId) {
+  getDb().prepare('DELETE FROM worker_nodes WHERE id = ?').run(workerId);
+}
+
+function getWorkerStats(workerId, limit = 100) {
+  return getDb().prepare(`
+    SELECT * FROM worker_stats 
+    WHERE worker_id = ? 
+    ORDER BY timestamp DESC 
+    LIMIT ?
+  `).all(workerId, limit);
+}
+
+function checkStaleWorkers(timeoutMs = 60000) {
+  const cutoffTime = new Date(Date.now() - timeoutMs).toISOString();
+  
+  const staleWorkers = getDb().prepare(`
+    SELECT id, name FROM worker_nodes 
+    WHERE status = 'online' 
+    AND (last_heartbeat IS NULL OR last_heartbeat < ?)
+  `).all(cutoffTime);
+  
+  if (staleWorkers.length > 0) {
+    getDb().prepare(`
+      UPDATE worker_nodes 
+      SET status = 'offline',
+          updated_at = datetime('now')
+      WHERE status = 'online' 
+      AND (last_heartbeat IS NULL OR last_heartbeat < ?)
+    `).run(cutoffTime);
+  }
+  
+  return staleWorkers;
+}
+
 module.exports = {
   initDatabase,
   getDb,
@@ -288,5 +493,17 @@ module.exports = {
   cleanExpiredTokens,
   getAllApiConfigs,
   getApiConfig,
-  updateApiConfig
+  updateApiConfig,
+  // 工作节点管理
+  registerWorker,
+  updateWorkerHeartbeat,
+  getWorkersByService,
+  getAllWorkers,
+  getWorkerById,
+  updateWorkerConnections,
+  updateWorkerStats,
+  markWorkerOffline,
+  removeWorker,
+  getWorkerStats,
+  checkStaleWorkers
 };

@@ -13,11 +13,12 @@ const db = require('./db/sqlite');
 const { authenticateToken } = require('./middleware/auth');
 const { errorHandler, notFoundHandler } = require('./middleware/error');
 const authRouter = require('./routes/auth');
-const renderRouter = require('./routes/render');
+const renderRouter = require('./routes/render-lb'); // 使用负载均衡版本
 const parseRouter = require('./routes/parse');
 const comboRouter = require('./routes/combo');
 const statsRouter = require('./routes/stats');
 const adminRouter = require('./routes/admin');
+const workerRouter = require('./routes/worker');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -98,16 +99,27 @@ app.use('/api/v1/parse', authenticateToken, parseRouter);
 app.use('/api/v1/combo', authenticateToken, comboRouter);
 app.use('/api/v1/stats', authenticateToken, statsRouter);
 app.use('/api/v1/admin', adminRouter);
+app.use('/api/v1/worker', workerRouter);
 
 // ============ 404 和错误处理 ============
 
 app.use('*', notFoundHandler);
 app.use(errorHandler);
 
+// ============ 健康检查定时任务 ============
+
+// 每10秒检查一次工作节点健康状态
+setInterval(() => {
+  const staleWorkers = db.checkStaleWorkers(60000); // 60秒超时
+  if (staleWorkers.length > 0) {
+    logger.info(`标记 ${staleWorkers.length} 个节点为离线: ${staleWorkers.map(w => w.name).join(', ')}`);
+  }
+}, 10000);
+
 // ============ 启动服务器 ============
 
 app.listen(PORT, () => {
-  logger.info(`ViSurf API Gateway started`);
+  logger.info(`ViSurf API Gateway (Master) started`);
   logger.info(`Port: ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   logger.info(`Health check: http://localhost:${PORT}/health`);
@@ -121,6 +133,9 @@ app.listen(PORT, () => {
   logger.info(`  POST /api/v1/auth/refresh-apikey (Refresh API key)`);
   logger.info(`  GET  /api/v1/stats               (User statistics)`);
   logger.info(`  GET  /api/v1/stats/usage         (Usage history)`);
+  logger.info(`  POST /api/v1/worker/register     (Worker registration)`);
+  logger.info(`  POST /api/v1/worker/heartbeat    (Worker heartbeat)`);
+  logger.info(`  GET  /api/v1/worker/list         (List all workers)`);
 });
 
 module.exports = app;

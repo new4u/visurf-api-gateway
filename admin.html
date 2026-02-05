@@ -153,6 +153,41 @@
       border-color: #667eea;
     }
 
+    .billing-mode-selector {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+    }
+
+    .radio-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      color: #333;
+    }
+
+    .radio-label input[type="radio"] {
+      cursor: pointer;
+    }
+
+    .time-price-input {
+      margin-top: 10px;
+      display: none;
+    }
+
+    .time-price-input.active {
+      display: block;
+    }
+
     .btn {
       padding: 12px 24px;
       border: none;
@@ -344,8 +379,16 @@
               <span class="endpoint">${config.endpoint}</span>
             </div>
             <div class="info-row">
+              <span class="info-label">计费模式:</span>
+              <span class="info-value">${config.billing_mode === 'per_time' ? '⏱️ 按时间' : '🔢 按次'}</span>
+            </div>
+            <div class="info-row">
               <span class="info-label">当前费用:</span>
-              <span class="info-value" style="color: #667eea; font-size: 18px;">¥${config.cost.toFixed(2)}</span>
+              <span class="info-value" style="color: #667eea; font-size: 18px;">
+                ${config.billing_mode === 'per_time' 
+                  ? `¥${(config.time_unit_price || 0).toFixed(3)}/秒` 
+                  : `¥${config.cost.toFixed(2)}/次`}
+              </span>
             </div>
           </div>
 
@@ -353,8 +396,27 @@
             ${config.description || '暂无描述'}
           </div>
 
-          <div class="cost-input-group">
-            <label>修改费用 (元/次):</label>
+          <div class="billing-mode-selector">
+            <label>计费模式:</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="billing-mode-${config.id}" value="per_call" 
+                  ${config.billing_mode === 'per_call' ? 'checked' : ''}
+                  onchange="toggleBillingMode('${config.id}', 'per_call')">
+                按次计费
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="billing-mode-${config.id}" value="per_time" 
+                  ${config.billing_mode === 'per_time' ? 'checked' : ''}
+                  onchange="toggleBillingMode('${config.id}', 'per_time')">
+                按时间计费
+              </label>
+            </div>
+          </div>
+
+          <div class="cost-input-group" id="per-call-input-${config.id}" 
+               style="display: ${config.billing_mode === 'per_call' ? 'block' : 'none'}">
+            <label>费用 (元/次):</label>
             <div class="input-with-button">
               <input 
                 type="number" 
@@ -363,9 +425,28 @@
                 value="${config.cost}"
                 step="0.01"
                 min="0"
-                placeholder="输入新费用"
+                placeholder="输入费用"
               />
-              <button class="btn btn-primary" onclick="updateCost('${config.id}')">
+              <button class="btn btn-primary" onclick="updateConfig('${config.id}')">
+                💾 保存
+              </button>
+            </div>
+          </div>
+
+          <div class="cost-input-group" id="per-time-input-${config.id}" 
+               style="display: ${config.billing_mode === 'per_time' ? 'block' : 'none'}">
+            <label>时间单价 (元/秒):</label>
+            <div class="input-with-button">
+              <input 
+                type="number" 
+                class="cost-input" 
+                id="time-price-${config.id}"
+                value="${config.time_unit_price || 0}"
+                step="0.001"
+                min="0"
+                placeholder="输入时间单价"
+              />
+              <button class="btn btn-primary" onclick="updateConfig('${config.id}')">
                 💾 保存
               </button>
             </div>
@@ -396,14 +477,37 @@
       document.getElementById('avgCost').textContent = '¥' + avgCost.toFixed(2);
     }
 
-    // 更新费用
-    async function updateCost(id) {
-      const input = document.getElementById(`cost-${id}`);
-      const newCost = parseFloat(input.value);
+    // 切换计费模式
+    function toggleBillingMode(id, mode) {
+      document.getElementById(`per-call-input-${id}`).style.display = mode === 'per_call' ? 'block' : 'none';
+      document.getElementById(`per-time-input-${id}`).style.display = mode === 'per_time' ? 'block' : 'none';
+    }
 
-      if (isNaN(newCost) || newCost < 0) {
-        showMessage('请输入有效的费用金额', 'error');
-        return;
+    // 更新配置
+    async function updateConfig(id) {
+      const config = configs.find(c => c.id === id);
+      const billingMode = document.querySelector(`input[name="billing-mode-${id}"]:checked`).value;
+      
+      const updates = {
+        billing_mode: billingMode
+      };
+
+      if (billingMode === 'per_call') {
+        const costInput = document.getElementById(`cost-${id}`);
+        const newCost = parseFloat(costInput.value);
+        if (isNaN(newCost) || newCost < 0) {
+          showMessage('请输入有效的费用金额', 'error');
+          return;
+        }
+        updates.cost = newCost;
+      } else {
+        const timePriceInput = document.getElementById(`time-price-${id}`);
+        const newTimePrice = parseFloat(timePriceInput.value);
+        if (isNaN(newTimePrice) || newTimePrice < 0) {
+          showMessage('请输入有效的时间单价', 'error');
+          return;
+        }
+        updates.time_unit_price = newTimePrice;
       }
 
       try {
@@ -412,13 +516,17 @@
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ cost: newCost })
+          body: JSON.stringify(updates)
         });
 
         const result = await response.json();
 
         if (result.success) {
-          showMessage(`✅ ${result.data.name} 费用已更新为 ¥${newCost.toFixed(2)}`, 'success');
+          const modeText = billingMode === 'per_time' ? '按时间计费' : '按次计费';
+          const priceText = billingMode === 'per_time' 
+            ? `¥${updates.time_unit_price.toFixed(3)}/秒` 
+            : `¥${updates.cost.toFixed(2)}/次`;
+          showMessage(`✅ ${result.data.name} 已更新为${modeText} ${priceText}`, 'success');
           await loadConfigs();
         } else {
           showMessage('更新失败: ' + result.message, 'error');

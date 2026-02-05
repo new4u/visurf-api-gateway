@@ -51,26 +51,61 @@ const SERVICE_MAP = {
 }
 ```
 
-## 💰 付费管理
+## 💰 计费管理
 
-### 计费规则
+### 计费模式
+
+系统支持两种计费模式，可通过管理界面动态切换：
+
+**1. 按次计费 (per_call)**
+- 每次 API 调用固定费用
+- 适合执行时间稳定的服务
+
+**2. 按时间计费 (per_time)** ⭐ 当前默认
+- 根据实际执行时间计费
+- 计费公式：`费用 = 时间单价(元/秒) × 执行时间(秒)`
+- 更公平、更精确
+
+### 当前计费配置
+
 ```javascript
-const PRICING_RULES = {
-  parser: { base: 0.001, unit: 'character', min: 0.1 },
-  layout: { base: 0.01, unit: 'node', min: 0.5 },
-  renderer: { base: 0.05, unit: 'node', min: 1.0 },
-  combo: { base: 0.08, unit: 'node', min: 0.8 }
+const API_PRICING = {
+  render: {
+    mode: 'per_time',
+    timeUnitPrice: 0.01,  // ¥0.01/秒
+    description: 'SVG 渲染服务'
+  },
+  parse: {
+    mode: 'per_time',
+    timeUnitPrice: 0.02,  // ¥0.02/秒
+    description: '文本解析服务'
+  },
+  combo: {
+    mode: 'per_time',
+    timeUnitPrice: 0.03,  // ¥0.03/秒
+    description: '组合服务（解析+渲染）'
+  }
 };
 ```
 
-### 试用额度
-```javascript
-const TRIAL_LIMITS = {
-  parser: 1000,  // 字符数
-  layout: 100,    // 节点数
-  renderer: 50,   // 节点数
-  combo: 20       // 节点数
-};
+### 计费示例
+
+**render API (¥0.01/秒)**
+```
+执行时间: 15ms = 0.015秒
+费用 = 0.01 × 0.015 = ¥0.00015
+```
+
+**parse API (¥0.02/秒)**
+```
+执行时间: 2.5秒
+费用 = 0.02 × 2.5 = ¥0.05
+```
+
+**combo API (¥0.03/秒)**
+```
+执行时间: 3.8秒
+费用 = 0.03 × 3.8 = ¥0.114
 ```
 
 ## 🔐 安全机制
@@ -127,6 +162,29 @@ node test-api.js
 open http://localhost:8080/test.html
 ```
 
+## 🎛️ 管理界面
+
+### 启动管理后台
+```bash
+# 启动管理界面服务器（端口 8081）
+node serve-admin.js
+
+# 在浏览器中打开
+open http://localhost:8081
+```
+
+### 功能特性
+- ✅ **实时配置管理** - 查看所有 API 配置
+- ✅ **计费模式切换** - 按次计费 ⇄ 按时间计费
+- ✅ **动态调价** - 实时修改费用和时间单价
+- ✅ **服务开关** - 启用/禁用 API 服务
+- ✅ **可视化界面** - 美观的卡片式布局
+
+### 管理 API
+- `GET /api/v1/admin/configs` - 获取所有 API 配置
+- `GET /api/v1/admin/configs/:id` - 获取单个 API 配置
+- `PUT /api/v1/admin/configs/:id` - 更新 API 配置
+
 ## 📖 API 端点
 
 ### 认证相关
@@ -136,13 +194,13 @@ open http://localhost:8080/test.html
 - `POST /api/v1/auth/refresh-apikey` - 刷新 API 密钥
 
 ### 核心服务
-- `POST /api/v1/render` - SVG 渲染
-- `POST /api/v1/parse` - 文本解析 (需要 Claude API Key)
-- `POST /api/v1/combo` - 组合服务 (需要 Claude API Key)
+- `POST /api/v1/render` - SVG 渲染（按时间计费）
+- `POST /api/v1/parse` - 文本解析（按时间计费，需要 Claude API Key）
+- `POST /api/v1/combo` - 组合服务（按时间计费，需要 Claude API Key）
 
 ### 统计查询
 - `GET /api/v1/stats` - 用户统计
-- `GET /api/v1/stats/usage` - 用量历史
+- `GET /api/v1/stats/usage` - 用量历史（包含时间信息）
 
 ### 系统
 - `GET /health` - 健康检查
@@ -315,5 +373,59 @@ const HTTP_POOL_CONFIG = {
   keepAlive: true
 };
 ```
+
+## 📊 数据库结构
+
+### api_config 表
+存储 API 配置信息，支持动态计费配置：
+
+```sql
+CREATE TABLE api_config (
+  id TEXT PRIMARY KEY,              -- API 标识
+  name TEXT NOT NULL,               -- API 名称
+  endpoint TEXT NOT NULL,           -- API 端点
+  cost REAL NOT NULL,               -- 按次计费金额
+  billing_mode TEXT DEFAULT 'per_call',  -- 计费模式
+  time_unit_price REAL DEFAULT 0,   -- 时间单价(元/秒)
+  description TEXT,                 -- 描述
+  enabled INTEGER DEFAULT 1,        -- 是否启用
+  created_at DATETIME,              -- 创建时间
+  updated_at DATETIME               -- 更新时间
+);
+```
+
+### usage_log 表
+记录 API 使用情况，包含详细的时间信息：
+
+```sql
+CREATE TABLE usage_log (
+  id INTEGER PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  service TEXT NOT NULL,
+  cost REAL DEFAULT 0,
+  start_time TEXT,        -- 开始时间
+  end_time TEXT,          -- 结束时间
+  duration_ms INTEGER,    -- 执行时长(毫秒)
+  metadata TEXT,          -- 元数据(JSON)
+  created_at TEXT
+);
+```
+
+## 🔄 数据库迁移
+
+如果从旧版本升级，需要运行迁移脚本：
+
+```bash
+# 迁移数据库结构，添加时间计费字段
+node migrate-db.js
+```
+
+## 📚 相关文档
+
+- **[TIME_BILLING.md](./TIME_BILLING.md)** - 按时间计费详细说明
+- **[test.html](http://localhost:8080/test.html)** - API 测试页面
+- **[admin.html](http://localhost:8081)** - 管理后台界面
+
+---
 
 这个网关服务将作为整个ViSurf API生态系统的统一入口，提供安全、可靠、高性能的API聚合服务。
